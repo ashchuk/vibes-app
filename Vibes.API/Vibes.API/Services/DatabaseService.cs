@@ -30,6 +30,9 @@ public interface IDatabaseService
     /// Получаем активных пользователей
     /// </summary>
     Task<List<VibesUser>> GetActiveUsersForCheckupAsync();
+    
+    Task<List<DailyPlan>> GetRecentDailyPlansAsync(int userId, int days = 3);
+    Task<List<EventRating>> GetRecentEventRatingsAsync(int userId, int days = 7);
 }
 
 public class DatabaseService : IDatabaseService
@@ -104,6 +107,24 @@ public class DatabaseService : IDatabaseService
         // Выбираем пользователей, которые завершили онбординг И подключили календарь
         return await _context.VibesUsers
             .Where(u => u.IsOnboardingCompleted && u.GoogleCalendarRefreshToken != null)
+            .ToListAsync();
+    }
+    
+    public async Task<List<DailyPlan>> GetRecentDailyPlansAsync(int userId, int days = 3)
+    {
+        var startDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-days));
+        return await _context.DailyPlans
+            .Where(p => p.UserId == userId && p.PlanDate >= startDate)
+            .OrderByDescending(p => p.PlanDate)
+            .ToListAsync();
+    }
+
+    public async Task<List<EventRating>> GetRecentEventRatingsAsync(int userId, int days = 7)
+    {
+        var startDate = DateTime.UtcNow.AddDays(-days);
+        return await _context.EventRatings
+            .Where(r => r.UserId == userId && r.RatedAtUtc >= startDate)
+            .OrderByDescending(r => r.RatedAtUtc)
             .ToListAsync();
     }
 }

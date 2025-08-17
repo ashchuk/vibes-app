@@ -334,16 +334,22 @@ public class TelegramMessageHandler(
                 var textSchedule = message.Text;
                 logger.LogInformation("Пользователь {UserId} прислал расписание текстом: {TextSchedule}", user.Id, textSchedule);
 
-                // --- НАЧАЛО НОВОЙ ЛОГИКИ ---
 
                 // 1. Сообщаем пользователю, что мы начали работу
                 await botClient.SendMessage(message.Chat.Id, "Принял! Сверяюсь с вашим календарем и составляю лучший план на день. Секунду...", cancellationToken: cancellationToken);
 
-                // 2. Получаем события из календаря
+                // 2.1 Получаем события из календаря
                 var scheduleCalendarEvents = await calendarService.GetUpcomingEvents(user);
-
+                // 2.2 ИЗВЛЕКАЕМ "ПАМЯТЬ" ИЗ БАЗЫ ДАННЫХ
+                var recentPlans = await databaseService.GetRecentDailyPlansAsync(user.Id);
+                var recentRatings = await databaseService.GetRecentEventRatingsAsync(user.Id);
+                
                 // 3. Вызываем LLM для генерации плана на основе текста и событий календаря
-                var structuredPlan = await llmService.GeneratePlanFromTextAsync(textSchedule, scheduleCalendarEvents);
+                var structuredPlan = await llmService.GeneratePlanFromTextAsync(
+                    textSchedule,
+                    scheduleCalendarEvents,
+                    recentPlans,
+                    recentRatings);
 
                 if (structuredPlan.StartsWith("[ERROR]"))
                 {
