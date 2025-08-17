@@ -7,7 +7,7 @@ from tqdm import tqdm
 
 system_prompt = '''You are a helpful assistant.'''
 client = OpenAI(
-    api_key="AIzaSyBKZaE1fxeX-03r0m8Wk_teq0yBSFNxWuQ",
+    api_key="SOME_KEY_HERE",
     base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
 )
 
