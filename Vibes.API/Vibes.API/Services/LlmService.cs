@@ -36,7 +36,7 @@ public interface ILlmService
     // --- МЕТОД-РОУТЕР ---
     Task<UserIntent> ClassifyUserIntentAsync(string userText);
 
-    Task<ExtractedEvent> ExtractFirstEventFromPlanAsync(string planText, DateTime today);
+    Task<ExtractedEvent> ExtractFirstEventFromPlanAsync(string planText, string userTimeZoneId);
 
     /// <summary>
     /// Определяет IANA Time Zone ID по текстовому описанию от пользователя.
@@ -46,7 +46,7 @@ public interface ILlmService
     Task<string?> GetTimeZoneIdFromUserInputAsync(string userInput);
 
     Task<string> GenerateGeneralChatResponseAsync(string userText);
-    
+
     Task<string> TranscribeAudioAsync(Stream audioStream, string mimeType);
 }
 
@@ -219,39 +219,97 @@ public class LlmService : ILlmService
         }
     }
 
-    public async Task<ExtractedEvent> ExtractFirstEventFromPlanAsync(string planText, DateTime today)
+    public async Task<ExtractedEvent> ExtractFirstEventFromPlanAsync(string planText, string userTimeZoneId)
     {
-        var prompt = $"""
-                      Ты — AI-парсер. Твоя задача — проанализировать текстовый план на день и извлечь информацию о ПЕРВОМ ключевом событии или фокус-блоке.
-                      Верни результат в формате JSON.
+        // Получаем текущее время в таймзоне пользователя
+        var userTimeNow = TimeZoneInfo.ConvertTime(DateTime.UtcNow, TimeZoneInfo.FindSystemTimeZoneById(userTimeZoneId ?? "Etc/UTC"));
 
-                      - **title**: Название события. Выбери самую важную задачу.
-                      - **startTime**: Время начала в формате HH:mm.
-                      - **durationMinutes**: Продолжительность в минутах. Если не указана, используй 60.
+        var prompt = 
+            $"""
+            Ты — высокоточный AI-парсер. Твоя единственная задача — извлечь из текста пользователя ОДНО, самое важное и конкретное НОВОЕ событие для добавления в календарь.
+            Ты должен вернуть результат в СТРОГОМ JSON формате. Не добавляй никаких объяснений или лишнего текста.
+            
+            **КОНТЕКСТ ДЛЯ АНАЛИЗА:**
+            - Текущая дата и время в таймзоне пользователя: {userTimeNow:yyyy-MM-dd HH:mm}
+            - Сегодня {userTimeNow.DayOfWeek}.
+            
+            """ +
+            """
+            **ИНСТРУКЦИИ ПО ИЗВЛЕЧЕНИЮ:**
+            1.  **ПРИОРИТЕТ:** Ищи явные указания на создание нового события. Фразы "добавь в план", "запланируй", "нужно встретиться" важнее, чем простое перечисление дел.
+            2.  **ИГНОРИРУЙ СУЩЕСТВУЮЩЕЕ:** Если текст упоминает события, которые УЖЕ есть в календаре, полностью их игнорируй. Твоя цель — найти то, чего еще нет.
+            3.  **ОПРЕДЕЛЕНИЕ ДАТЫ И ВРЕМЕНИ:**
+                - Если сказано "завтра в 15:00", используй дату завтрашнего дня и время 15:00.
+                - Если сказано "встреча в понедельник", а сегодня суббота, используй дату ближайшего понедельника и время по умолчанию 12:00.
+                - Если сказано "в 9 утра", а сейчас 11 утра, используй дату ЗАВТРАШНЕГО дня.
+                - Если сказано "в 2 часа дня", используй "14:00".
+            4.  **КРАЙНИЕ СЛУЧАИ:** Если в тексте нет никаких конкретных новых задач для добавления в календарь, или это простое перечисление без конкретики, верни JSON с `"title": "null"`.
 
-                      Если в тексте нет явных событий с временем, найди главную задачу и назначь ей время на 10:00.
-                      Если план пустой или нерелевантный, верни JSON с "title": "null".
+            ---
+            **ПРИМЕРЫ:**
 
-                      **Сегодняшняя дата:** {today:yyyy-MM-dd}
-                      **Текст плана для анализа:**
-                      {planText}
+            **Пример 1:**
+            - Текст: "Напомни, что у меня дейлик в 8:20, а еще нужно сходить погулять с собакой в 9 утра в понедельник."
+            - JSON-ответ:
+            ```json
+            {
+              "title": "Прогулка с собакой",
+              "startDateTime": "{/* Дата следующего понедельника */} 09:00",
+              "durationMinutes": 60
+            }
+            ```
+            *(Пояснение для тебя: ты правильно проигнорировал "дейлик", так как это напоминание, и извлек "прогулку с собакой" как новое событие).*
 
-                      **JSON-ответ:**
-                      """;
+            **Пример 2:**
+            - Текст: "Завтра нужно сдать отчет. И еще созвон с клиентом в 14:00."
+            - JSON-ответ:
+            ```json
+            {
+              "title": "Созвон с клиентом",
+              "startDateTime": "{/* Дата завтрашнего дня */} 14:00",
+              "durationMinutes": 60
+            }
+            ```
+            *(Пояснение для тебя: "сдать отчет" - задача без времени, а "созвон с клиентом" - конкретное событие, оно важнее).*
+
+            **Пример 3:**
+            - Текст: "Ничем, я не хочу менять календарь."
+            - JSON-ответ:
+            ```json
+            {
+              "title": "null"
+            }
+            ```
+
+            **Пример 4:**
+            - Текст: "нужно сделать презентацию и ответить на письма"
+            - JSON-ответ:
+            ```json
+            {
+              "title": "Сделать презентацию",
+              "startDateTime": "{/* Дата сегодняшнего или завтрашнего дня */} 10:00",
+              "durationMinutes": 90
+            }
+            ```
+            *(Пояснение для тебя: ты выбрал более важную задачу и назначил ей время по умолчанию).*
+            ---
+
+            **ТЕПЕРЬ ТВОЯ ЗАДАЧА:**
+
+            **Текст плана для анализа:**
+            {planText}
+
+            **JSON-ответ (только JSON, без пояснений):**
+        """;
 
         try
         {
             var response = await _model.GenerateContent(prompt);
-            var jsonResponse = response.Text
-                .Trim()
-                .Replace("```json", "")
-                .Replace("```", "");
-
+            var jsonResponse = response.Text.Trim().Replace("```json", "").Replace("```", "");
             var parsedJson = System.Text.Json.JsonDocument.Parse(jsonResponse);
             var root = parsedJson.RootElement;
 
             var title = root.TryGetProperty("title", out var titleProp) ? titleProp.GetString() : null;
-
             if (string.IsNullOrEmpty(title) || title.Equals("null", StringComparison.OrdinalIgnoreCase))
             {
                 return new ExtractedEvent
@@ -260,12 +318,11 @@ public class LlmService : ILlmService
                 };
             }
 
-            var startTimeStr = root.TryGetProperty("startTime", out var timeProp) ? timeProp.GetString() : "10:00";
+            var startDateTimeStr = root.TryGetProperty("startDateTime", out var dtProp) ? dtProp.GetString() : null;
             var duration = root.TryGetProperty("durationMinutes", out var durProp) && durProp.TryGetInt32(out var d) ? d : 60;
 
-            if (TimeSpan.TryParse(startTimeStr, out var time))
+            if (DateTime.TryParse(startDateTimeStr, out var startTime))
             {
-                var startTime = today.Date + time;
                 return new ExtractedEvent
                 {
                     Found = true,
@@ -513,7 +570,7 @@ public class LlmService : ILlmService
 
                           - **About**: Пользователь задает вопросы о самом боте, его функциях, создателях или предназначении.
                             Примеры: "что ты умеешь?", "кто ты?", "расскажи о себе", "для чего ты нужен?", "помощь", "help"
-                      
+
                           - **Plan**: Пользователь хочет составить, изменить или добавить что-то в план. Фокус на **будущих действиях**.
                             Примеры: "составь план на день", "хочу запланировать встречу с Анной в 3", "добавь в мой список дел 'купить молоко'", "на сегодня у меня такие задачи...", "что мне сегодня делать?", "накидай расписание", "завтра нужно сдать отчет и позвонить маме"
 
@@ -555,7 +612,7 @@ public class LlmService : ILlmService
             return UserIntent.Unknown;
         }
     }
-    
+
     public async Task<string> TranscribeAudioAsync(Stream audioStream, string mimeType)
     {
         // Для транскрибации лучше всего подходят специализированные модели,
@@ -570,10 +627,17 @@ public class LlmService : ILlmService
 
             var parts = new List<IPart>
             {
-                new TextData { Text = prompt },
-                new InlineData { MimeType = mimeType, Data = Convert.ToBase64String(audioBytes) }
+                new TextData
+                {
+                    Text = prompt
+                },
+                new InlineData
+                {
+                    MimeType = mimeType,
+                    Data = Convert.ToBase64String(audioBytes)
+                }
             };
-            
+
             // Важно: Мы используем ту же модель, что и для Vision, так как она мультимодальная
             var response = await _model.GenerateContent(parts);
             return response.Text;

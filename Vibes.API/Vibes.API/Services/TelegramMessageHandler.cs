@@ -569,9 +569,9 @@ public class TelegramMessageHandler(
             // 2.1. Отправляем текст плана в LLM, чтобы извлечь детали события
             await botClient.SendChatAction(message.Chat.Id, ChatAction.Typing, cancellationToken: cancellationToken);
 
-            var extractedEvent = await llmService.ExtractFirstEventFromPlanAsync(planText, DateTime.UtcNow);
+            var extractedEvent = await llmService.ExtractFirstEventFromPlanAsync(planText, user.TimeZoneId ?? "Etc/UTC");
 
-            if (extractedEvent.Found && extractedEvent.StartTime.HasValue && extractedEvent.EndTime.HasValue)
+            if (extractedEvent is { Found: true, StartTime: not null, EndTime: not null })
             {
                 // 2.2. Если детали успешно извлечены, создаем событие в Google Calendar
                 var createdEvent = await calendarService.CreateEventAsync(user, extractedEvent.Title, extractedEvent.StartTime.Value, extractedEvent.EndTime.Value);
