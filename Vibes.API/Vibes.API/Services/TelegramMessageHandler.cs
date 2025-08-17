@@ -49,10 +49,14 @@ public class TelegramMessageHandler(
 
         var task = callbackQuery.Data switch
         {
-            // --- ОБРАБОТЧИК ДЛЯ КНОПОК ОНБОРДИНГА ---
-            "onboarding_start" when user.State == ConversationState.OnboardingAwaitingStart
-                => HandleOnboardingStart(user, callbackQuery.From.Id, cancellationToken),
+            // --- ОБРАБОТЧИКИ ДЛЯ КНОПОК ОНБОРДИНГА ---
+            "onboarding_start" when user.State == ConversationState.OnboardingAwaitingStart => HandleOnboardingStart(user, callbackQuery.From.Id, cancellationToken),
+            "connect_calendar_onboarding" => HandleConnectCalendarOnboarding(user, callbackQuery, cancellationToken),
+            "skip_calendar_onboarding" => HandleSkipCalendarOnboarding(user, callbackQuery, cancellationToken),
 
+            "command_check_calendar" => HandleCheckCalendarCommand(user, callbackQuery.From.Id, cancellationToken),
+            "command_plan" => HandlePlanCommand(user, callbackQuery.From.Id, cancellationToken),
+            
             // --- ОБРАБОТЧИК ДЛЯ КНОПОК ОЦЕНКИ ЭНЕРГИИ ---
             var data when data.StartsWith("energy_rating_")
                 => HandleEnergyRatingCallback(user, callbackQuery, cancellationToken),
@@ -69,6 +73,35 @@ public class TelegramMessageHandler(
             _ => botClient.AnswerCallbackQuery(callbackQuery.Id, "Эта кнопка уже неактивна", cancellationToken: cancellationToken)
         };
         await task;
+    }
+
+    private async Task HandleConnectCalendarOnboarding(VibesUser user, CallbackQuery callbackQuery, CancellationToken cancellationToken)
+    {
+        // Отправляем ту же самую ссылку для авторизации
+        await HandleConnectCalendarCommand(user, callbackQuery.From.Id, cancellationToken);
+
+        // Завершаем онбординг и отправляем приветственное сообщение
+        await FinalizeOnboarding(user, callbackQuery.From.Id, cancellationToken);
+    }
+
+    private async Task HandleSkipCalendarOnboarding(VibesUser user, CallbackQuery callbackQuery, CancellationToken cancellationToken)
+    {
+        // Просто завершаем онбординг
+        await FinalizeOnboarding(user, callbackQuery.From.Id, cancellationToken);
+    }
+
+    // Общий метод для завершения онбординга
+    private async Task FinalizeOnboarding(VibesUser user, long chatId, CancellationToken cancellationToken)
+    {
+        user.State = ConversationState.None;
+        user.IsOnboardingCompleted = true;
+        await databaseService.UpdateUserAsync(user);
+
+        var finalText = "Отлично, мы готовы начинать!\n\n" +
+                        "Просто напишите мне, что у вас на уме. Например: \"Составь план на завтра\" или \"Чувствую себя уставшим\". Я пойму вас.\n\n" +
+                        "Если захотите подключить календарь позже, просто напишите \"подключить календарь\".";
+
+        await botClient.SendMessage(chatId, finalText, cancellationToken: cancellationToken);
     }
 
     private async Task HandleEventRatingCallback(VibesUser user, CallbackQuery callbackQuery, CancellationToken cancellationToken)
@@ -217,21 +250,32 @@ public class TelegramMessageHandler(
                 cancellationToken: cancellationToken);
             return;
         }
-        
+
+        // --- НОВЫЙ ОНБОРДИНГ ---
         user.State = ConversationState.OnboardingAwaitingStart;
-        user.ConversationContext = null;
         await databaseService.UpdateUserAsync(user);
 
-        var personalizedText = $"Привет, {user.FirstName}! Я Vibes — ваш личный ассистент для управления энергией и задачами.\n\n" +
-                               "Я помогу вам:\n" +
-                               "✅ Находить связь между сном, активностью и настроением.\n" +
-                               "✅ Составлять реалистичные планы на день.\n" +
-                               "✅ Не выгорать и оставаться в ресурсе.\n\n" +
-                               "Давайте начнем с быстрой настройки (займет 30 секунд).";
-        
-        var inlineKeyboard = new InlineKeyboardMarkup(InlineKeyboardButton.WithCallbackData("Начать настройку ✨", "onboarding_start"));
+        // Вместо гифки и длинного текста даем короткое и емкое приветствие
+        var welcomeText = $"Привет, {user.FirstName}! Я Vibes — ваш личный AI-ассистент для управления энергией.\n\n" +
+                          "Мои две суперсилы:\n\n" +
+                          "🧠 **Память:** Я запоминаю ваши предпочтения и то, что вас заряжает или утомляет, чтобы давать действительно персональные советы.\n\n" +
+                          "🗓️ **Интеграция с Google Calendar:** Я могу видеть ваше расписание, чтобы помогать планировать день и находить окна для отдыха и фокуса.\n\n" +
+                          "Чтобы я мог вам помогать, лучше всего сразу подключить ваш календарь. Это безопасно и займет всего минуту.";
 
-        await botClient.SendMessage(chatId: chatId, text: personalizedText, replyMarkup: inlineKeyboard, cancellationToken: cancellationToken);
+        var inlineKeyboard = new InlineKeyboardMarkup(new[]
+        {
+            // Кнопка, которая сразу запускает подключение календаря
+            InlineKeyboardButton.WithCallbackData("✅ Подключить Google Calendar", "connect_calendar_onboarding"),
+            // Кнопка для тех, кто хочет сделать это позже
+            InlineKeyboardButton.WithCallbackData("Позже", "skip_calendar_onboarding")
+        });
+
+        await botClient.SendMessage(
+            chatId: chatId,
+            text: welcomeText,
+            replyMarkup: inlineKeyboard,
+            cancellationToken: cancellationToken
+        );
     }
 
     private async Task HandleConversation(VibesUser user, Message message, CancellationToken cancellationToken)
@@ -242,15 +286,45 @@ public class TelegramMessageHandler(
         {
             // --- СЦЕНАРИЙ ОНБОРДИНГА ---
             case ConversationState.OnboardingAwaitingTimezone:
-                var timezone = message.Text;
-                // TODO: Добавить валидацию таймзоны и сохранить ее в профиле пользователя
-                logger.LogInformation("Пользователь {UserId} установил таймзону: {Timezone}", user.Id, timezone);
+                var userInput = message.Text;
+    
+                // Вызываем LLM для определения таймзоны
+                var timeZoneId = await llmService.GetTimeZoneIdFromUserInputAsync(userInput);
 
-                user.State = ConversationState.AwaitingRetroSleepAndActivity; // Переходим к сбору ретро-данных
+                if (timeZoneId == null)
+                {
+                    // Не удалось определить, просим еще раз
+                    await botClient.SendMessage(message.Chat.Id, 
+                        "Не смог распознать часовой пояс. Попробуйте, пожалуйста, еще раз. Например: 'Москва' или 'UTC+3'.", 
+                        cancellationToken: cancellationToken);
+                    break;
+                }
+
+                user.TimeZoneId = timeZoneId;
+                logger.LogInformation("Пользователю {UserId} установлена таймзона: {TimeZoneId}", user.Id, timeZoneId);
+                
+                user.State = ConversationState.None;
+                user.IsOnboardingCompleted = true; // Важно!
                 await databaseService.UpdateUserAsync(user);
 
-                const string retroText = "Готово! Теперь я буду учитывать твою таймзону.\n\nХочешь ввести данные о сне и шаговой активности за предыдущие 2 дня? Тогда я смогу прислать тебе инсайты уже сейчас.\n\nПросто напиши в свободной форме, например: 'Позавчера спал 6ч, прошел 5000 шагов. Вчера 8ч, 10000 шагов'.";
-                await botClient.SendMessage(message.Chat.Id, retroText, cancellationToken: cancellationToken);
+                // 2. Формируем новое, вовлекающее сообщение
+                var transitionText = $"Отлично, таймзона ({timeZoneId}) установлена!\n\n" +
+                                     "Теперь я готов помочь вам спланировать ваш день. Чтобы я мог составить для вас лучший план, мне нужно понимать ваш контекст.\n\n" +
+                                     "**Самый лучший способ — подключить ваш Google Calendar.**";
+
+                // 3. Предлагаем ключевое действие — подключение календаря
+                var inlineKeyboard = new InlineKeyboardMarkup(new[]
+                {
+                    InlineKeyboardButton.WithCallbackData("✅ Подключить Google Calendar", "connect_calendar_onboarding"),
+                    InlineKeyboardButton.WithCallbackData("Пока пропустить", "skip_calendar_onboarding")
+                });
+
+                await botClient.SendMessage(
+                    chatId: message.Chat.Id,
+                    text: transitionText,
+                    replyMarkup: inlineKeyboard,
+                    cancellationToken: cancellationToken
+                );
                 break;
 
             // --- СЦЕНАРИЙ СБОРА РЕТРО-ДАННЫХ (User Story #8) ---
@@ -358,7 +432,7 @@ public class TelegramMessageHandler(
                 // 2.2 ИЗВЛЕКАЕМ "ПАМЯТЬ" ИЗ БАЗЫ ДАННЫХ
                 var recentPlans = await databaseService.GetRecentDailyPlansAsync(user.Id);
                 var recentRatings = await databaseService.GetRecentEventRatingsAsync(user.Id);
-                
+
                 // 3. Вызываем LLM для генерации плана на основе текста и событий календаря
                 var structuredPlan = await llmService.GeneratePlanFromTextAsync(
                     textSchedule,
@@ -408,16 +482,9 @@ public class TelegramMessageHandler(
     private async Task HandlePlanAccept(VibesUser user, long chatId, Message message, CancellationToken cancellationToken)
     {
         logger.LogInformation("Пользователь {UserId} подтвердил план.", user.Id);
+        var planText = message.Text ?? "План не был сохранен.";
 
-        // Извлекаем текст плана из сообщения, к которому были привязаны кнопки.
-        var planText = message.Text;
-        if (string.IsNullOrWhiteSpace(planText))
-        {
-            logger.LogWarning("Текст плана для сохранения пуст. Пользователь {UserId}", user.Id);
-            planText = "План не был сохранен из-за ошибки.";
-        }
-
-        // Создаем и сохраняем запись о плане в базе данных с помощью нашего нового универсального метода.
+        // 1. Сохраняем план в нашу базу данных
         var newPlan = new DailyPlan
         {
             UserId = user.Id,
@@ -427,10 +494,34 @@ public class TelegramMessageHandler(
         };
         await databaseService.AddRecordAsync(newPlan);
 
-        // Отправляем пользователю позитивное подтверждение.
+        // 2. Если календарь подключен, пытаемся создать событие
+        if (user.IsGoogleCalendarConnected)
+        {
+            // 2.1. Отправляем текст плана в LLM, чтобы извлечь детали события
+            var extractedEvent = await llmService.ExtractFirstEventFromPlanAsync(planText, DateTime.UtcNow);
+
+            if (extractedEvent.Found && extractedEvent.StartTime.HasValue && extractedEvent.EndTime.HasValue)
+            {
+                // 2.2. Если детали успешно извлечены, создаем событие в Google Calendar
+                var createdEvent = await calendarService.CreateEventAsync(user, extractedEvent.Title, extractedEvent.StartTime.Value, extractedEvent.EndTime.Value);
+
+                if (createdEvent?.HtmlLink != null)
+                {
+                    // 2.3. Отправляем подтверждение с прямой ссылкой на событие
+                    await botClient.SendMessage(
+                        chatId: chatId,
+                        text: $"Отлично! План принят, и я создал для вас фокус-блок \"{extractedEvent.Title}\" в Google Calendar. <a href=\"{createdEvent.HtmlLink}\">Посмотреть событие</a>.",
+                        parseMode: ParseMode.Html,
+                        cancellationToken: cancellationToken);
+                    return; // Завершаем, чтобы не отправлять второе сообщение
+                }
+            }
+        }
+
+        // 3. Этот текст отправится, если календарь не подключен или не удалось создать/извлечь событие
         await botClient.SendMessage(
             chatId: chatId,
-            text: "Отлично! План принят и сохранен. Я буду рядом, чтобы помочь тебе в течение дня и напомню о важных моментах. 😉",
+            text: "Отлично! План принят и сохранен. Подключите Google Calendar, чтобы я мог автоматически добавлять ключевые задачи в ваше расписание!",
             cancellationToken: cancellationToken);
     }
 
@@ -491,7 +582,7 @@ public class TelegramMessageHandler(
         // --- ДОБАВЛЯЕМ ЗАПИСЬ ВРЕМЕНИ ОТПРАВКИ ---
         user.LastEveningCheckupSentUtc = DateTime.UtcNow;
         await databaseService.UpdateUserAsync(user);
-        
+
         // 1. Получаем события за сегодняшний день (по UTC)
         var eventsToday = await calendarService.GetEventsForDateAsync(user, DateTime.UtcNow);
 
@@ -783,7 +874,7 @@ public class TelegramMessageHandler(
     private async Task HandleDefaultMessageAsync(VibesUser user, Message message, CancellationToken cancellationToken)
     {
         if (message.Text is null) return;
-    
+
         // 0. Если пользователь новый и пишет что-то, кроме /start,
         // мы все равно должны сначала провести его через онбординг.
         if (!user.IsOnboardingCompleted)

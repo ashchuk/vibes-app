@@ -15,14 +15,14 @@ public interface ICalendarService
     string GenerateAuthUrl(long telegramUserId);
     Task HandleAuthCallback(VibesUser user, string code);
     Task<IList<Event>> GetUpcomingEvents(VibesUser user, int maxResults = 10);
-    
+
     /// Получает все события пользователя за указанную дату.
     /// </summary>
     /// <param name="user">Пользователь</param>
     /// <param name="date">Дата, за которую нужно получить события</param>
     /// <returns>Список событий.</returns>
     Task<IList<Event>> GetEventsForDateAsync(VibesUser user, DateTime date);
-    
+
     /// <summary>
     /// Получает одно конкретное событие по его ID.
     /// </summary>
@@ -30,6 +30,16 @@ public interface ICalendarService
     /// <param name="eventId">ID события из Google Calendar</param>
     /// <returns>Объект события или null, если не найдено.</returns>
     Task<Event?> GetEventByIdAsync(VibesUser user, string eventId);
+
+    /// <summary>
+    /// Создает новое событие в основном календаре пользователя.
+    /// </summary>
+    /// <param name="user">Пользователь</param>
+    /// <param name="title">Название события</param>
+    /// <param name="startTime">Время начала</param>
+    /// <param name="endTime">Время окончания</param>
+    /// <returns>Созданное событие с URL или null в случае ошибки.</returns>
+    Task<Event?> CreateEventAsync(VibesUser user, string title, DateTime startTime, DateTime endTime);
 }
 
 public class CalendarService : ICalendarService
@@ -54,10 +64,64 @@ public class CalendarService : ICalendarService
             },
             Scopes =
             [
-                Google.Apis.Calendar.v3.CalendarService.Scope.CalendarReadonly
+                Google.Apis.Calendar.v3.CalendarService.Scope.Calendar
             ],
             Prompt = "consent"
         });
+    }
+
+    public async Task<Event?> CreateEventAsync(VibesUser user, string title, DateTime startTime, DateTime endTime)
+    {
+        // 1. Проверяем, есть ли у нас вообще право на запись
+        if (!user.IsGoogleCalendarConnected)
+        {
+            _logger.LogWarning("Попытка создать событие для пользователя {UserId} без подключенного календаря.", user.Id);
+            return null;
+        }
+
+        // 2. Создаем клиент сервиса (тот же код, что и в других методах)
+        var userCredential = new UserCredential(CreateFlow(), user.TelegramId.ToString(), new TokenResponse
+        {
+            RefreshToken = user.GoogleCalendarRefreshToken
+        });
+
+        var googleCalendarService = new Google.Apis.Calendar.v3.CalendarService(new BaseClientService.Initializer
+        {
+            HttpClientInitializer = userCredential,
+            ApplicationName = _config.ApplicationName
+        });
+
+        // 3. Создаем объект нового события
+        var newEvent = new Event()
+        {
+            Summary = title,
+            Description = "Это событие было создано вашим AI-ассистентом Vibes...",
+            Start = new EventDateTime()
+            {
+                DateTimeDateTimeOffset = startTime,
+                TimeZone = user.TimeZoneId ?? "Etc/UTC" // Если таймзона не установлена, используем UTC
+            },
+            End = new EventDateTime()
+            {
+                DateTimeDateTimeOffset = endTime,
+                TimeZone = user.TimeZoneId ?? "Etc/UTC"
+            },
+        };
+
+        try
+        {
+            // 4. Отправляем запрос на создание события в основной календарь ('primary')
+            var request = googleCalendarService.Events.Insert(newEvent, "primary");
+            var createdEvent = await request.ExecuteAsync();
+
+            _logger.LogInformation("Успешно создано событие '{EventSummary}' для пользователя {UserId}", createdEvent.Summary, user.Id);
+            return createdEvent;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Ошибка при создании события в Google Calendar для пользователя {UserId}", user.Id);
+            return null;
+        }
     }
 
     public string GenerateAuthUrl(long telegramUserId)
@@ -66,7 +130,7 @@ public class CalendarService : ICalendarService
         var redirectUri = _config.RedirectUri; // Этот URL должен совпадать с тем, что в Google Console
 
         var authUrl = flow.CreateAuthorizationCodeRequest(redirectUri);
-        
+
         authUrl.State = telegramUserId.ToString(); // Отправляем ID пользователя, чтобы узнать его при callback'е
 
         return authUrl.Build().ToString();
@@ -98,7 +162,7 @@ public class CalendarService : ICalendarService
         {
             RefreshToken = user.GoogleCalendarRefreshToken
         });
-        
+
         var calendarService = new Google.Apis.Calendar.v3.CalendarService(new BaseClientService.Initializer
         {
             HttpClientInitializer = userCredential,
@@ -115,7 +179,7 @@ public class CalendarService : ICalendarService
         var events = await request.ExecuteAsync();
         return events.Items;
     }
-    
+
     public async Task<IList<Event>> GetEventsForDateAsync(VibesUser user, DateTime date)
     {
         if (!user.IsGoogleCalendarConnected)
@@ -123,12 +187,12 @@ public class CalendarService : ICalendarService
             _logger.LogWarning("Попытка получить события для пользователя {UserId} без подключенного календаря.", user.Id);
             return new List<Event>();
         }
-        
+
         var userCredential = new UserCredential(CreateFlow(), user.TelegramId.ToString(), new TokenResponse
         {
             RefreshToken = user.GoogleCalendarRefreshToken
         });
-        
+
         var googleCalendarService = new Google.Apis.Calendar.v3.CalendarService(new BaseClientService.Initializer
         {
             HttpClientInitializer = userCredential,
@@ -136,11 +200,11 @@ public class CalendarService : ICalendarService
         });
 
         var request = googleCalendarService.Events.List("primary");
-        
+
         // Устанавливаем временные рамки: с начала до конца указанного дня
         request.TimeMinDateTimeOffset = date.Date; // 00:00:00 указанного дня
         request.TimeMaxDateTimeOffset = date.Date.AddDays(1).AddTicks(-1); // 23:59:59.999... указанного дня
-        
+
         request.ShowDeleted = false;
         request.SingleEvents = true;
         request.OrderBy = EventsResource.ListRequest.OrderByEnum.StartTime;
@@ -148,19 +212,19 @@ public class CalendarService : ICalendarService
         var events = await request.ExecuteAsync();
         return events.Items ?? new List<Event>(); // Возвращаем пустой список, если Items is null
     }
-    
+
     public async Task<Event?> GetEventByIdAsync(VibesUser user, string eventId)
     {
         if (!user.IsGoogleCalendarConnected || string.IsNullOrEmpty(eventId))
         {
             return null;
         }
-        
+
         var userCredential = new UserCredential(CreateFlow(), user.TelegramId.ToString(), new TokenResponse
         {
             RefreshToken = user.GoogleCalendarRefreshToken
         });
-        
+
         var googleCalendarService = new Google.Apis.Calendar.v3.CalendarService(new BaseClientService.Initializer
         {
             HttpClientInitializer = userCredential,

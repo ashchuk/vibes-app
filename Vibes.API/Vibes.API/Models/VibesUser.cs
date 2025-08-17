@@ -41,4 +41,9 @@ public class VibesUser
     public DateTime? LastEveningCheckupSentUtc { get; set; }
     
     public bool IsOnboardingCompleted { get; set; } = false;
+    
+    /// <summary>
+    /// IANA Time Zone ID пользователя (например, "Europe/Moscow")
+    /// </summary>
+    public string? TimeZoneId { get; set; }
 }

@@ -1,22 +1,18 @@
 using Microsoft.AspNetCore.Mvc;
+using Telegram.Bot;
+using Telegram.Bot.Types.ReplyMarkups;
 using Vibes.API.Services;
 
 namespace Vibes.API.Controllers;
 
 [ApiController]
 [Route("/api/google-auth")]
-public class GoogleAuthController : ControllerBase
+public class GoogleAuthController(
+    ICalendarService calendarService,
+    IDatabaseService databaseService,
+    ITelegramBotClient botClient,
+    ILogger<GoogleAuthController> logger) : ControllerBase
 {
-    private readonly ICalendarService _calendarService;
-    private readonly IDatabaseService _databaseService;
-    private readonly ILogger<GoogleAuthController> _logger;
-
-    public GoogleAuthController(ICalendarService calendarService, IDatabaseService databaseService, ILogger<GoogleAuthController> logger)
-    {
-        _calendarService = calendarService;
-        _databaseService = databaseService;
-        _logger = logger;
-    }
 
     // Этот метод не будет вызываться напрямую, он нужен для получения URI
     private string GetCallbackUrl() => Url.Action(nameof(Callback), "GoogleAuth", null, Request.Scheme)!;
@@ -27,12 +23,12 @@ public class GoogleAuthController : ControllerBase
     {
         if (string.IsNullOrEmpty(code) || !long.TryParse(state, out var telegramUserId))
         {
-            _logger.LogError("Неверный callback от Google. Code: {Code}, State: {State}", code, state);
+            logger.LogError("Неверный callback от Google. Code: {Code}, State: {State}", code, state);
             return BadRequest("Неверные параметры авторизации.");
         }
 
         // Упрощенное создание для примера
-        var user = await _databaseService.GetOrCreateUserAsync(new()
+        var user = await databaseService.GetOrCreateUserAsync(new()
         {
             Id = telegramUserId
         });
@@ -42,9 +38,35 @@ public class GoogleAuthController : ControllerBase
         }
 
         // Обмениваем код на токен и сохраняем его
-        await _calendarService.HandleAuthCallback(user, code);
-        await _databaseService.UpdateUserAsync(user);
+        await calendarService.HandleAuthCallback(user, code);
+        await databaseService.UpdateUserAsync(user);
+        logger.LogInformation("Календарь для пользователя {UserId} успешно подключен.", user.Id);
 
+        try
+        {
+            var successText = "Отлично, ваш Google Calendar успешно подключен! 🎉\n\n" +
+                              "Теперь я могу видеть ваше расписание и помогать с планированием.\n\n" +
+                              "Хотите, я прямо сейчас **проверю ваш календарь** на сегодня или **составлю план** на завтра?";
+
+            var inlineKeyboard = new InlineKeyboardMarkup(new[]
+            {
+                // Эти callbackData будут перехвачены нашим OnCallbackQuery и запустят соответствующие команды
+                InlineKeyboardButton.WithCallbackData("🔍 Проверить календарь", "command_check_calendar"),
+                InlineKeyboardButton.WithCallbackData("📝 Составить план", "command_plan")
+            });
+
+            await botClient.SendMessage(
+                chatId: telegramUserId,
+                text: successText,
+                replyMarkup: inlineKeyboard,
+                cancellationToken: CancellationToken.None
+            );
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Не удалось отправить подтверждающее сообщение в Telegram после подключения календаря для пользователя {UserId}", user.Id);
+        }
+        
         // Показываем пользователю страницу об успехе
         var htmlContent = """
                 <!DOCTYPE html>
