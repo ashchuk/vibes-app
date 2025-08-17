@@ -208,13 +208,28 @@ public class TelegramMessageHandler(
 
     private async Task HandleStartCommand(VibesUser user, long chatId, CancellationToken cancellationToken)
     {
+        if (user.IsOnboardingCompleted)
+        {
+            // Пользователь уже проходил онбординг, просто приветствуем
+            await botClient.SendMessage(
+                chatId: chatId,
+                text: $"С возвращением, {user.FirstName}! Чем я могу помочь сегодня? Напишите, что у вас на уме, или используйте команду /plan, чтобы составить расписание.",
+                cancellationToken: cancellationToken);
+            return;
+        }
+        
         user.State = ConversationState.OnboardingAwaitingStart;
         user.ConversationContext = null;
         await databaseService.UpdateUserAsync(user);
 
-        var personalizedText = $"{user.FirstName ?? "Привет"}! Я помогу спланировать день так, чтобы энергии хватало на важное и ты не выгорал. Давай за 30 секунд настроим часовой пояс и удобные времена напоминаний.";
-
-        var inlineKeyboard = new InlineKeyboardMarkup(InlineKeyboardButton.WithCallbackData("OK, поехали", "onboarding_start"));
+        var personalizedText = $"Привет, {user.FirstName}! Я Vibes — ваш личный ассистент для управления энергией и задачами.\n\n" +
+                               "Я помогу вам:\n" +
+                               "✅ Находить связь между сном, активностью и настроением.\n" +
+                               "✅ Составлять реалистичные планы на день.\n" +
+                               "✅ Не выгорать и оставаться в ресурсе.\n\n" +
+                               "Давайте начнем с быстрой настройки (займет 30 секунд).";
+        
+        var inlineKeyboard = new InlineKeyboardMarkup(InlineKeyboardButton.WithCallbackData("Начать настройку ✨", "onboarding_start"));
 
         await botClient.SendMessage(chatId: chatId, text: personalizedText, replyMarkup: inlineKeyboard, cancellationToken: cancellationToken);
     }
@@ -768,6 +783,14 @@ public class TelegramMessageHandler(
     private async Task HandleDefaultMessageAsync(VibesUser user, Message message, CancellationToken cancellationToken)
     {
         if (message.Text is null) return;
+    
+        // 0. Если пользователь новый и пишет что-то, кроме /start,
+        // мы все равно должны сначала провести его через онбординг.
+        if (!user.IsOnboardingCompleted)
+        {
+            await HandleStartCommand(user, message.Chat.Id, cancellationToken);
+            return;
+        }
 
         // 1. Отправляем текст в LLM для классификации
         var intent = await llmService.ClassifyUserIntentAsync(message.Text);
