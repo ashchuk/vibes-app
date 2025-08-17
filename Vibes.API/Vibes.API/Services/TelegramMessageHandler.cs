@@ -493,6 +493,7 @@ public class TelegramMessageHandler(
 
                 // 1. Сообщаем пользователю, что мы начали работу
                 await botClient.SendMessage(message.Chat.Id, "Принял! Сверяюсь с вашим календарем и составляю лучший план на день. Секунду...", cancellationToken: cancellationToken);
+                await botClient.SendChatAction(message.Chat.Id, ChatAction.Typing, cancellationToken: cancellationToken);
 
                 // 2.1 Получаем события из календаря
                 var scheduleCalendarEvents = await calendarService.GetUpcomingEvents(user);
