@@ -56,7 +56,7 @@ public class TelegramMessageHandler(
 
             "command_check_calendar" => HandleCheckCalendarCommand(user, callbackQuery.From.Id, cancellationToken),
             "command_plan" => HandlePlanCommand(user, callbackQuery.From.Id, cancellationToken),
-            
+
             // --- ОБРАБОТЧИК ДЛЯ КНОПОК ОЦЕНКИ ЭНЕРГИИ ---
             var data when data.StartsWith("energy_rating_")
                 => HandleEnergyRatingCallback(user, callbackQuery, cancellationToken),
@@ -64,7 +64,7 @@ public class TelegramMessageHandler(
             // --- ОБРАБОТЧИК ДЛЯ КНОПКИ ПРИНЯТЬ ПЛАН ---
             "plan_accept" => HandlePlanAccept(user, callbackQuery.Message.Chat.Id, callbackQuery.Message, cancellationToken),
             "dialog_cancel" => HandleDialogCancel(user, callbackQuery, cancellationToken),
-            
+
             // --- ОБРАБОТЧИК ДЛЯ КНОПКИ ИЗМЕНИТЬ ПЛАН ---
             "plan_edit" => HandlePlanEdit(user, callbackQuery.Message.Chat.Id, cancellationToken),
 
@@ -92,7 +92,7 @@ public class TelegramMessageHandler(
             cancellationToken: cancellationToken
         );
     }
-    
+
     private async Task HandleConnectCalendarOnboarding(VibesUser user, CallbackQuery callbackQuery, CancellationToken cancellationToken)
     {
         // Отправляем ту же самую ссылку для авторизации
@@ -236,14 +236,14 @@ public class TelegramMessageHandler(
         var user = await databaseService.GetOrCreateUserAsync(message.From);
 
         string? messageText = message.Text;
-        
+
         // 1. Если это аудио или видео, транскрибируем его в текст
         if (message.Voice is not null || message.VideoNote is not null)
         {
             await botClient.SendChatAction(message.Chat.Id, ChatAction.Typing, cancellationToken: cancellationToken);
             var fileId = message.Voice?.FileId ?? message.VideoNote!.FileId;
             var mimeType = message.Voice is not null ? "audio/ogg" : "video/mp4";
-        
+
             await using var memoryStream = new MemoryStream();
             var file = await botClient.GetFile(fileId, cancellationToken);
             if (file.FilePath is null)
@@ -251,13 +251,13 @@ public class TelegramMessageHandler(
                 await botClient.SendMessage(message.Chat.Id, "Не удалось обработать голосовое сообщение.", cancellationToken: cancellationToken);
                 return;
             }
-        
+
             await botClient.DownloadFile(file.FilePath, memoryStream, cancellationToken);
             memoryStream.Position = 0;
 
             messageText = await llmService.TranscribeAudioAsync(memoryStream, mimeType);
         }
-        
+
         if (!string.IsNullOrEmpty(messageText))
         {
             var command = messageText.Split(' ')[0];
@@ -300,7 +300,7 @@ public class TelegramMessageHandler(
             cancellationToken: cancellationToken
         );
     }
-    
+
     private async Task HandleStartCommand(VibesUser user, long chatId, CancellationToken cancellationToken)
     {
         if (user.IsOnboardingCompleted)
@@ -349,7 +349,7 @@ public class TelegramMessageHandler(
             // --- СЦЕНАРИЙ ОНБОРДИНГА ---
             case ConversationState.OnboardingAwaitingTimezone:
                 var userInput = message.Text;
-    
+
                 // Вызываем LLM для определения таймзоны
                 await botClient.SendChatAction(message.Chat.Id, ChatAction.Typing, cancellationToken: cancellationToken);
 
@@ -358,15 +358,15 @@ public class TelegramMessageHandler(
                 if (timeZoneId == null)
                 {
                     // Не удалось определить, просим еще раз
-                    await botClient.SendMessage(message.Chat.Id, 
-                        "Не смог распознать часовой пояс. Попробуйте, пожалуйста, еще раз. Например: 'Москва' или 'UTC+3'.", 
+                    await botClient.SendMessage(message.Chat.Id,
+                        "Не смог распознать часовой пояс. Попробуйте, пожалуйста, еще раз. Например: 'Москва' или 'UTC+3'.",
                         cancellationToken: cancellationToken);
                     break;
                 }
 
                 user.TimeZoneId = timeZoneId;
                 logger.LogInformation("Пользователю {UserId} установлена таймзона: {TimeZoneId}", user.Id, timeZoneId);
-                
+
                 user.State = ConversationState.None;
                 user.IsOnboardingCompleted = true; // Важно!
                 await databaseService.UpdateUserAsync(user);
@@ -379,8 +379,7 @@ public class TelegramMessageHandler(
                 // 3. Предлагаем ключевое действие — подключение календаря
                 var inlineKeyboard = new InlineKeyboardMarkup(new[]
                 {
-                    InlineKeyboardButton.WithCallbackData("✅ Подключить Google Calendar", "connect_calendar_onboarding"),
-                    InlineKeyboardButton.WithCallbackData("Пока пропустить", "skip_calendar_onboarding")
+                    InlineKeyboardButton.WithCallbackData("✅ Подключить Google Calendar", "connect_calendar_onboarding"), InlineKeyboardButton.WithCallbackData("Пока пропустить", "skip_calendar_onboarding")
                 });
 
                 await botClient.SendMessage(
@@ -433,7 +432,7 @@ public class TelegramMessageHandler(
                 await databaseService.UpdateUserAsync(user);
 
                 await botClient.SendMessage(message.Chat.Id,
-                    "Отлично. Чем сегодня займёмся? Назови 1–3 обязательных дела.", 
+                    "Отлично. Чем сегодня займёмся? Назови 1–3 обязательных дела.",
                     replyMarkup: new InlineKeyboardMarkup(InlineKeyboardButton.WithCallbackData("❌ Отмена", "dialog_cancel")),
                     cancellationToken: cancellationToken);
                 break;
@@ -551,6 +550,14 @@ public class TelegramMessageHandler(
     /// </summary>
     private async Task HandlePlanAccept(VibesUser user, long chatId, Message message, CancellationToken cancellationToken)
     {
+        var currentUser = await databaseService.GetOrCreateUserAsync(message.From);
+        if (currentUser == null)
+        {
+            // На всякий случай, если пользователь не найден
+            await botClient.SendMessage(chatId, "Произошла ошибка, не удалось найти ваш профиль.", cancellationToken: cancellationToken);
+            return;
+        }
+
         logger.LogInformation("Пользователь {UserId} подтвердил план.", user.Id);
         var planText = message.Text ?? "План не был сохранен.";
 
@@ -565,7 +572,7 @@ public class TelegramMessageHandler(
         await databaseService.AddRecordAsync(newPlan);
 
         // 2. Если календарь подключен, пытаемся создать событие
-        if (user.IsGoogleCalendarConnected)
+        if (currentUser.IsGoogleCalendarConnected)
         {
             // 2.1. Отправляем текст плана в LLM, чтобы извлечь детали события
             await botClient.SendChatAction(message.Chat.Id, ChatAction.Typing, cancellationToken: cancellationToken);
@@ -734,34 +741,50 @@ public class TelegramMessageHandler(
 
         try
         {
-            // Шаг 3: Вызываем наш сервис для получения 10 ближайших событий.
             var events = await calendarService.GetUpcomingEvents(user, 10);
 
-            // Шаг 4: Обрабатываем случай, если событий нет.
             if (events is null || events.Count == 0)
             {
                 await botClient.SendMessage(chatId, "✅ В вашем календаре нет предстоящих событий.", cancellationToken: cancellationToken);
                 return;
             }
 
-            // Шаг 5: Формируем красивый ответ с помощью StringBuilder и Markdown.
+            // 1. Получаем таймзону пользователя или используем UTC по умолчанию
+            TimeZoneInfo userTimeZone;
+            try
+            {
+                userTimeZone = TimeZoneInfo.FindSystemTimeZoneById(user.TimeZoneId ?? "Etc/UTC");
+            }
+            catch (TimeZoneNotFoundException)
+            {
+                logger.LogWarning("Не найдена таймзона {TimeZoneId} для пользователя {UserId}. Используется UTC.", user.TimeZoneId, user.Id);
+                userTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Etc/UTC");
+            }
+
             var responseBuilder = new System.Text.StringBuilder("Вот ваши ближайшие события:\n\n");
             foreach (var calendarEvent in events)
             {
-                // Google API может вернуть либо конкретное время, либо только дату (для событий на весь день).
-                var eventTime = calendarEvent.Start.DateTimeDateTimeOffset.HasValue
-                    ? calendarEvent.Start.DateTimeDateTimeOffset.Value.ToLocalTime().ToString("g") // Формат "24.08.2025 14:30"
-                    : calendarEvent.Start.Date; // Формат "2025-08-24"
+                string eventTime;
+                if (calendarEvent.Start.DateTimeDateTimeOffset.HasValue)
+                {
+                    // 2. Конвертируем время из UTC в локальное время пользователя
+                    var utcTime = calendarEvent.Start.DateTimeDateTimeOffset.Value.UtcDateTime;
+                    var userLocalTime = TimeZoneInfo.ConvertTimeFromUtc(utcTime, userTimeZone);
+                    eventTime = userLocalTime.ToString("dd.MM.yyyy HH:mm"); // Используем более привычный формат
+                }
+                else
+                {
+                    // Для событий на весь день просто показываем дату
+                    eventTime = calendarEvent.Start.Date;
+                }
 
                 responseBuilder.AppendLine($"🗓️ *{calendarEvent.Summary}*");
                 responseBuilder.AppendLine($"   - Начало: `{eventTime}`");
-                responseBuilder.AppendLine(); // Пустая строка для отступа
+                responseBuilder.AppendLine();
             }
 
-            // Шаг 6: Отправляем отформатированное сообщение.
-            await SendFormattedMessageAsync(chatId,
-                responseBuilder.ToString(),
-                replyMarkup: new InlineKeyboardMarkup(),
+            await SendFormattedMessageAsync(chatId, responseBuilder.ToString(),
+                replyMarkup: null,
                 cancellationToken: cancellationToken);
         }
         catch (Exception ex)
@@ -948,7 +971,7 @@ public class TelegramMessageHandler(
     private async Task HandleDefaultMessageAsync(VibesUser user, Message message, string recognizedText, CancellationToken cancellationToken)
     {
         if (string.IsNullOrEmpty(recognizedText)) return;
-        
+
         // 0. Если пользователь новый и пишет что-то, кроме /start,
         // мы все равно должны сначала провести его через онбординг.
         if (!user.IsOnboardingCompleted)
@@ -956,7 +979,7 @@ public class TelegramMessageHandler(
             await HandleStartCommand(user, message.Chat.Id, cancellationToken);
             return;
         }
-        
+
         // 1. Отправляем текст в LLM для классификации
         await botClient.SendChatAction(message.Chat.Id, ChatAction.Typing, cancellationToken: cancellationToken);
         var intent = await llmService.ClassifyUserIntentAsync(recognizedText);
@@ -990,10 +1013,10 @@ public class TelegramMessageHandler(
                 logger.LogInformation("Определено намерение: About");
                 await HandleAboutCommand(user, message.Chat.Id, cancellationToken);
                 break;
-            
+
             case UserIntent.GeneralChat:
                 logger.LogInformation("Определено намерение: GeneralChat");
-    
+
                 if (message.Text is not null)
                 {
                     await botClient.SendChatAction(message.Chat.Id, ChatAction.Typing, cancellationToken: cancellationToken);
