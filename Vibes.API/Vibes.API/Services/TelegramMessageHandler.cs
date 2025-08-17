@@ -11,16 +11,19 @@ using Vibes.API.Models;
 
 namespace Vibes.API.Services;
 
-public class TelegramMessageHandler(ILogger<TelegramMessageHandler> logger,
+public class TelegramMessageHandler(
+    ILogger<TelegramMessageHandler> logger,
     ITelegramBotClient botClient,
     ICalendarService calendarService,
     ILlmService llmService,
-    IMcpService mcpService,
     IDatabaseService databaseService,
     IOptions<GoogleCalendarConfiguration> googleCalendarConfiguration)
     : IUpdateHandler
 {
-    public async Task HandleUpdateAsync(ITelegramBotClient _, Update update, CancellationToken cancellationToken)
+    public async Task HandleUpdateAsync(
+        ITelegramBotClient _,
+        Update update,
+        CancellationToken cancellationToken)
     {
         var handler = update switch
         {
@@ -60,9 +63,81 @@ public class TelegramMessageHandler(ILogger<TelegramMessageHandler> logger,
             // --- ОБРАБОТЧИК ДЛЯ КНОПКИ ИЗМЕНИТЬ ПЛАН ---
             "plan_edit" => HandlePlanEdit(user, callbackQuery.Message.Chat.Id, cancellationToken),
 
+            var data when data.StartsWith("rate_event_")
+                => HandleEventRatingCallback(user, callbackQuery, cancellationToken),
+
             _ => botClient.AnswerCallbackQuery(callbackQuery.Id, "Эта кнопка уже неактивна", cancellationToken: cancellationToken)
         };
         await task;
+    }
+
+    private async Task HandleEventRatingCallback(VibesUser user, CallbackQuery callbackQuery, CancellationToken cancellationToken)
+    {
+        // 1. Парсим callbackData
+        var parts = callbackQuery.Data!.Split('_');
+        var eventId = parts[2];
+        var vibeTypeStr = parts[3];
+
+        // 2. Получаем список событий из контекста
+        var eventsToRate = JsonSerializer.Deserialize<Dictionary<string, string>>(user.ConversationContext ?? "{}")
+                           ?? new Dictionary<string, string>();
+
+        // 3. Сохраняем оценку в базу данных
+        var newRating = new EventRating
+        {
+            UserId = user.Id,
+            GoogleEventId = eventId,
+            EventSummary = eventsToRate.GetValueOrDefault(eventId, "Неизвестное событие"),
+            Vibe = Enum.Parse<VibeType>(vibeTypeStr, true),
+            RatedAtUtc = DateTime.UtcNow
+        };
+        await databaseService.AddRecordAsync(newRating);
+
+        // 4. Удаляем только что оцененное событие из нашего списка
+        eventsToRate.Remove(eventId);
+
+        // 5. Проверяем, остались ли еще события
+        if (eventsToRate.Any())
+        {
+            // Есть еще события. Показываем следующее.
+            var nextEvent = eventsToRate.First();
+            var nextEventId = nextEvent.Key;
+            var nextEventSummary = nextEvent.Value;
+
+            var keyboard = new InlineKeyboardMarkup(
+                InlineKeyboardButton.WithCallbackData("⚡️ Заряжает", $"rate_event_{nextEventId}_Energize"),
+                InlineKeyboardButton.WithCallbackData("😐 Нейтрально", $"rate_event_{nextEventId}_Neutral"),
+                InlineKeyboardButton.WithCallbackData("🪫 Утомляет", $"rate_event_{nextEventId}_Drain")
+            );
+
+            // Редактируем предыдущее сообщение, чтобы не спамить в чат
+            await botClient.EditMessageText(
+                chatId: user.TelegramId,
+                messageId: callbackQuery.Message.MessageId,
+                text: $"Отлично. А как насчет \"{nextEventSummary}\"?",
+                replyMarkup: keyboard,
+                cancellationToken: cancellationToken
+            );
+
+            // Обновляем контекст с оставшимися событиями
+            user.ConversationContext = JsonSerializer.Serialize(eventsToRate);
+            await databaseService.UpdateUserAsync(user);
+        }
+        else
+        {
+            // События закончились. Завершаем диалог.
+            user.State = ConversationState.None;
+            user.ConversationContext = null;
+            await databaseService.UpdateUserAsync(user);
+
+            await botClient.EditMessageText(
+                chatId: user.TelegramId,
+                messageId: callbackQuery.Message.MessageId,
+                text: "Спасибо! Все итоги дня подведены. Отличного вечера!",
+                replyMarkup: null, // Убираем кнопки
+                cancellationToken: cancellationToken
+            );
+        }
     }
 
     // Вспомогательный метод для чистоты кода
@@ -185,6 +260,7 @@ public class TelegramMessageHandler(ILogger<TelegramMessageHandler> logger,
                 await botClient.SendMessage(message.Chat.Id, insight, cancellationToken: cancellationToken);
 
                 user.State = ConversationState.None;
+                user.IsOnboardingCompleted = true; // Фиксируем факт что онбординг прошел
                 await databaseService.UpdateUserAsync(user);
                 await HandlePlanCommand(user, message.Chat.Id, cancellationToken);
                 break;
@@ -389,6 +465,53 @@ public class TelegramMessageHandler(ILogger<TelegramMessageHandler> logger,
             cancellationToken: cancellationToken);
     }
 
+    public async Task StartEveningCheckupAsync(VibesUser user, CancellationToken cancellationToken)
+    {
+        // --- ДОБАВЛЯЕМ ЗАПИСЬ ВРЕМЕНИ ОТПРАВКИ ---
+        user.LastEveningCheckupSentUtc = DateTime.UtcNow;
+        await databaseService.UpdateUserAsync(user);
+        
+        // 1. Получаем события за сегодняшний день (по UTC)
+        var eventsToday = await calendarService.GetEventsForDateAsync(user, DateTime.UtcNow);
+
+        if (eventsToday == null || eventsToday.Count == 0)
+        {
+            // Если событий не было, проводим упрощенный чекап.
+            // Переводим в состояние ожидания текстового ответа.
+            user.State = ConversationState.AwaitingEveningEnergyRating;
+            await databaseService.UpdateUserAsync(user);
+
+            await botClient.SendMessage(
+                chatId: user.TelegramId,
+                text: "Похоже, сегодня в календаре не было событий. Как прошел твой день в целом? Оцени, пожалуйста, свою энергию от 1 до 10.",
+                cancellationToken: cancellationToken);
+            return;
+        }
+
+        // 2. Если события были, начинаем диалог с их оценки
+        user.State = ConversationState.AwaitingEventRating;
+
+        // 3. Сохраняем ID и названия событий в контекст для последующей обработки.
+        // Это оптимизация, чтобы не дергать Google API за названием каждого события.
+        var eventSummaries = eventsToday.ToDictionary(e => e.Id, e => e.Summary);
+        user.ConversationContext = JsonSerializer.Serialize(eventSummaries);
+        await databaseService.UpdateUserAsync(user);
+
+        // 4. Берем первое событие и отправляем вопрос
+        var firstEvent = eventsToday.First();
+        var keyboard = new InlineKeyboardMarkup(
+            InlineKeyboardButton.WithCallbackData("⚡️ Заряжает", $"rate_event_{firstEvent.Id}_Energize"),
+            InlineKeyboardButton.WithCallbackData("😐 Нейтрально", $"rate_event_{firstEvent.Id}_Neutral"),
+            InlineKeyboardButton.WithCallbackData("🪫 Утомляет", $"rate_event_{firstEvent.Id}_Drain")
+        );
+
+        await botClient.SendMessage(
+            chatId: user.TelegramId,
+            text: $"Давай подведем итоги дня. Как ты оценишь событие \"{firstEvent.Summary}\"?",
+            replyMarkup: keyboard,
+            cancellationToken: cancellationToken);
+    }
+
     private async Task HandleConnectCalendarCommand(VibesUser user, long chatId, CancellationToken cancellationToken)
     {
         var authUrl = calendarService.GenerateAuthUrl(user.TelegramId);
@@ -461,7 +584,12 @@ public class TelegramMessageHandler(ILogger<TelegramMessageHandler> logger,
         {
             // Шаг 7: Обрабатываем возможные ошибки (например, если токен был отозван).
             logger.LogError(ex, "Ошибка при получении событий из Google Calendar для пользователя {UserId}", user.Id);
-            await botClient.SendMessage(chatId, "❌ Произошла ошибка при попытке прочитать ваш календарь. Возможно, потребуется переподключить его с помощью команды /connect_calendar.", cancellationToken: cancellationToken);
+            await botClient.SendMessage(chatId,
+                """
+                ❌ Произошла ошибка при попытке прочитать ваш календарь.
+                 Возможно, потребуется переподключить его с помощью команды /connect_calendar.
+                """,
+                cancellationToken: cancellationToken);
         }
     }
 
@@ -657,7 +785,7 @@ public class TelegramMessageHandler(ILogger<TelegramMessageHandler> logger,
                 logger.LogInformation("Определено намерение: CheckCalendar");
                 await HandleCheckCalendarCommand(user, message.Chat.Id, cancellationToken);
                 break;
-            
+
             case UserIntent.ActivateCalendar:
                 logger.LogInformation("Определено намерение: ActivateCalendar");
                 await HandleConnectCalendarCommand(user, message.Chat.Id, cancellationToken);

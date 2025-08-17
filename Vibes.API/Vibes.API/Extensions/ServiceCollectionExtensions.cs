@@ -10,7 +10,6 @@ public static class ServiceCollectionExtensions
         // Misc services
         services.AddScoped<IDatabaseService, DatabaseService>();
         services.AddTransient<ICalendarService, CalendarService>();
-        services.AddTransient<IMcpService, McpService>();
         services.AddTransient<ILlmService, LlmService>();
         
         // Telegram message handler

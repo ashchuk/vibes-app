@@ -60,27 +60,48 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 // Регистрация планировщика задач
 builder.Services.AddQuartz(q =>
 {
-    q.UseMicrosoftDependencyInjectionJobFactory();
+    // Deprecated?
+    // q.UseMicrosoftDependencyInjectionJobFactory();
 
     // Получаем CRON-выражение из конфигурации
-    var cronSchedule = quartzConfigSection.Get<QuartzConfiguration>()?.MorningCheckupCronSchedule;
+    var morningCronSchedule = quartzConfigSection.Get<QuartzConfiguration>()?.MorningCheckupCronSchedule;
+    var eveningCronSchedule = quartzConfigSection.Get<QuartzConfiguration>()?.EveningCheckupCronSchedule;
 
     // Проверка на случай, если значение в конфиге отсутствует
-    if (string.IsNullOrWhiteSpace(cronSchedule))
+    if (string.IsNullOrWhiteSpace(morningCronSchedule))
     {
         // Устанавливаем безопасное значение по умолчанию и выводим ошибку в лог
-        cronSchedule = "0 0 6 * * ?"; // Каждый день в 6:00 UTC
-        Console.WriteLine("[WARNING] CRON-выражение для утреннего чекапа не найдено в конфигурации. Используется значение по умолчанию: " + cronSchedule);
+        morningCronSchedule = "0 0 6 * * ?"; // Каждый день в 6:00 UTC
+        Console.WriteLine("[WARNING] CRON-выражение для утреннего чекапа не найдено в конфигурации. Используется значение по умолчанию: " + morningCronSchedule);
     }
 
-    var jobKey = new JobKey("MorningCheckupJob");
-    q.AddJob<MorningCheckupJob>(opts => opts.WithIdentity(jobKey));
+    // Проверка на случай, если значение в конфиге отсутствует
+    if (string.IsNullOrWhiteSpace(eveningCronSchedule))
+    {
+        // Устанавливаем безопасное значение по умолчанию и выводим ошибку в лог
+        eveningCronSchedule = "0 0 18 * * ?"; // Каждый день в 18:00 UTC
+        Console.WriteLine("[WARNING] CRON-выражение для вечернего чекапа не найдено в конфигурации. Используется значение по умолчанию: " + eveningCronSchedule);
+    }
 
+    var morningJobKey = new JobKey("MorningCheckupJob");
+    var eveningJobKey = new JobKey("EveningCheckupJob");
+    
+    q.AddJob<MorningCheckupJob>(opts => opts.WithIdentity(morningJobKey));
+    q.AddJob<EveningCheckupJob>(opts => opts.WithIdentity(eveningJobKey));
+
+    // --- РЕГИСТРАЦИЯ УТРЕННЕГО ЧЕКАПА ---
     q.AddTrigger(opts => opts
-        .ForJob(jobKey)
+        .ForJob(morningJobKey)
         .WithIdentity("MorningCheckupJob-trigger")
-        .WithCronSchedule(cronSchedule)
+        .WithCronSchedule(morningCronSchedule)
         .StartNow()
+    );
+
+    // --- РЕГИСТРАЦИЯ ВЕЧЕРНЕГО ЧЕКАПА (НОВЫЙ БЛОК) ---
+    q.AddTrigger(opts => opts
+        .ForJob(eveningJobKey)
+        .WithIdentity("EveningCheckupJob-trigger")
+        .WithCronSchedule(eveningCronSchedule)
     );
 });
 
@@ -148,7 +169,7 @@ using (IServiceScope scope = app.Services.CreateScope())
     // Set up the Telegram Bot webhook  
     ITelegramBotClient bot = scope.ServiceProvider.GetRequiredService<ITelegramBotClient>();
     IOptions<BotConfiguration> botConfig = scope.ServiceProvider.GetRequiredService<IOptions<BotConfiguration>>();
-    
+
     await bot.SetWebhook(
         botConfig.Value.BotWebhookUrl.ToString(),
         allowedUpdates: [],

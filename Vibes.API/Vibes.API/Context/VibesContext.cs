@@ -1,5 +1,4 @@
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Metadata;
 using Vibes.API.Models;
 
 namespace Vibes.API.Context;
@@ -9,6 +8,8 @@ public class VibesContext : DbContext, IVibesContext
     public DbSet<VibesUser> VibesUsers { get; set; }
     public DbSet<VibesMetric> VibesMetrics { get; set; }
     public DbSet<DailyPlan> DailyPlans { get; set; }
+    public DbSet<EventRating> EventRatings { get; set; }
+    
     Task IVibesContext.SaveChangesAsync() => SaveChangesAsync();
     Task IVibesContext.SaveChangesAsync(CancellationToken cancellationToken) => SaveChangesAsync(cancellationToken);
 
@@ -24,6 +25,10 @@ public class VibesContext : DbContext, IVibesContext
         _ = modelBuilder.Entity<VibesUser>() // Так мы будем хранить enum как строку в БД
             .Property(e => e.State)
             .HasConversion<string>(); 
+        
+        _ = modelBuilder.Entity<EventRating>() // Так мы будем хранить enum как строку в БД
+            .Property(e => e.Vibe)
+            .HasConversion<string>();
         
         _ = modelBuilder.Entity<VibesMetric>()
             .ToTable("VibesMetrics")

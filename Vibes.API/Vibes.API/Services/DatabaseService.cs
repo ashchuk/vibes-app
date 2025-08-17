@@ -25,6 +25,11 @@ public interface IDatabaseService
     /// <typeparam name="T">Тип сущности (например, DailyPlan, VibesMetric)</typeparam>
     /// <param name="record">Объект для сохранения</param>
     Task AddRecordAsync<T>(T record) where T : class;
+    
+    /// <summary>
+    /// Получаем активных пользователей
+    /// </summary>
+    Task<List<VibesUser>> GetActiveUsersForCheckupAsync();
 }
 
 public class DatabaseService : IDatabaseService
@@ -92,5 +97,13 @@ public class DatabaseService : IDatabaseService
         // а VibesContext - за низкоуровневые операции с базой данных.
         await _context.AddNewRecord(record);
         _logger.LogInformation("В базу данных добавлена новая запись типа {RecordType}", typeof(T).Name);
+    }
+    
+    public async Task<List<VibesUser>> GetActiveUsersForCheckupAsync()
+    {
+        // Выбираем пользователей, которые завершили онбординг И подключили календарь
+        return await _context.VibesUsers
+            .Where(u => u.IsOnboardingCompleted && u.GoogleCalendarRefreshToken != null)
+            .ToListAsync();
     }
 }

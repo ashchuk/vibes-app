@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Vibes.API.Context;
 
@@ -10,9 +11,11 @@ using Vibes.API.Context;
 namespace Vibes.API.Migrations
 {
     [DbContext(typeof(VibesContext))]
-    partial class VibesContextModelSnapshot : ModelSnapshot
+    [Migration("20250817101701_AddEventRatings")]
+    partial class AddEventRatings
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "9.0.8");

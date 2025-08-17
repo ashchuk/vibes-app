@@ -34,4 +34,11 @@ public class VibesUser
     /// Хранит дату и время (в UTC) последнего успешно отправленного утреннего чекапа.
     /// </summary>
     public DateTime? LastCheckupSentUtc { get; set; }
+    
+    /// <summary>
+    /// Хранит дату и время (в UTC) последнего успешно отправленного вечернего чекапа.
+    /// </summary>
+    public DateTime? LastEveningCheckupSentUtc { get; set; }
+    
+    public bool IsOnboardingCompleted { get; set; } = false;
 }

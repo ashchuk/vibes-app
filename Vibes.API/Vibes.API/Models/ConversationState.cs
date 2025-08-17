@@ -18,7 +18,11 @@ public enum ConversationState
     AwaitingMorningEnergyRating,
     AwaitingMorningSleepHours,
     AwaitingMorningPlans,
-
+    
+    // --- Состояния для вечернего чекапа (User Story #5) ---
+    AwaitingEveningEnergyRating,
+    AwaitingEventRating,
+    
     // --- Состояния для распознавания расписания (User Story #11) ---
     AwaitingSchedulePhoto,
     OnboardingCompleted

@@ -8,6 +8,7 @@ public interface IVibesContext
     public DbSet<VibesUser> VibesUsers { get; set; }
     public DbSet<VibesMetric> VibesMetrics { get; set; }
     public DbSet<DailyPlan> DailyPlans { get; set; }
+    public DbSet<EventRating> EventRatings { get; set; }
     
     public Task SaveChangesAsync();
     public Task SaveChangesAsync(CancellationToken cancellationToken);
