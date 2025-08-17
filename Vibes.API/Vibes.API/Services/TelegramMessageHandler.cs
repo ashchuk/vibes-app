@@ -63,7 +63,8 @@ public class TelegramMessageHandler(
 
             // --- ОБРАБОТЧИК ДЛЯ КНОПКИ ПРИНЯТЬ ПЛАН ---
             "plan_accept" => HandlePlanAccept(user, callbackQuery.Message.Chat.Id, callbackQuery.Message, cancellationToken),
-
+            "dialog_cancel" => HandleDialogCancel(user, callbackQuery, cancellationToken),
+            
             // --- ОБРАБОТЧИК ДЛЯ КНОПКИ ИЗМЕНИТЬ ПЛАН ---
             "plan_edit" => HandlePlanEdit(user, callbackQuery.Message.Chat.Id, cancellationToken),
 
@@ -75,6 +76,23 @@ public class TelegramMessageHandler(
         await task;
     }
 
+    private async Task HandleDialogCancel(VibesUser user, CallbackQuery callbackQuery, CancellationToken cancellationToken)
+    {
+        // 1. Сбрасываем состояние пользователя
+        user.State = ConversationState.None;
+        user.ConversationContext = null;
+        await databaseService.UpdateUserAsync(user);
+
+        // 2. Редактируем предыдущее сообщение, чтобы убрать кнопки и подтвердить отмену
+        await botClient.EditMessageText(
+            chatId: callbackQuery.Message.Chat.Id,
+            messageId: callbackQuery.Message.MessageId,
+            text: "Хорошо, отменили.",
+            replyMarkup: null,
+            cancellationToken: cancellationToken
+        );
+    }
+    
     private async Task HandleConnectCalendarOnboarding(VibesUser user, CallbackQuery callbackQuery, CancellationToken cancellationToken)
     {
         // Отправляем ту же самую ссылку для авторизации
