@@ -913,8 +913,19 @@ public class TelegramMessageHandler(
 
             case UserIntent.GeneralChat:
                 logger.LogInformation("Определено намерение: GeneralChat");
-                // TODO: Реализовать ответ-заглушку для общей болтовни
-                await botClient.SendMessage(message.Chat.Id, "Я здесь, чтобы помочь вам с планированием и энергией. Давайте сосредоточимся на этом!", cancellationToken: cancellationToken);
+    
+                if (message.Text is not null)
+                {
+                    var response = await llmService.GenerateGeneralChatResponseAsync(message.Text);
+                    if (response.Contains("[ERROR]"))
+                    {
+                        await botClient.SendMessage(message.Chat.Id, "Я здесь, чтобы помочь вам с планированием и энергией. Давайте сосредоточимся на этом!", cancellationToken: cancellationToken);
+                    }
+                    else
+                    {
+                        await botClient.SendMessage(message.Chat.Id, response, cancellationToken: cancellationToken);
+                    }
+                }
                 break;
 
             default: // Unknown

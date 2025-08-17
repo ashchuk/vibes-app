@@ -28,7 +28,7 @@
     </ItemGroup>
 
     <ItemGroup>
-        <None Update="AppData\Static\index.html">
+        <None Update="AppData\Static\landing.html">
           <CopyToOutputDirectory>Always</CopyToOutputDirectory>
         </None>
         <None Update="AppData\Static\privacy.html">

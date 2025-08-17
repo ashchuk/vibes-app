@@ -144,23 +144,22 @@ app.MapGet("/vibes", () =>
 
 app.MapControllers();
 
+
+var staticFileProvider = new PhysicalFileProvider(Path.Combine(Directory.GetCurrentDirectory(), "AppData", "Static"));
+
+var defaultFilesOptions = new DefaultFilesOptions
+{
+    FileProvider = staticFileProvider
+};
+defaultFilesOptions.DefaultFileNames.Clear();
+defaultFilesOptions.DefaultFileNames.Add("landing.html");
+
+app.UseDefaultFiles(defaultFilesOptions);
+
 app.UseStaticFiles(new StaticFileOptions
 {
-    FileProvider = new PhysicalFileProvider(Path.Combine(Directory.GetCurrentDirectory(), "AppData", "Static")),
-    RequestPath = "",
-    // Uncomment to enable static files authorization
-    // OnPrepareResponse = ctx =>
-    // {
-    //     if (ctx.Context.User.Identity is { IsAuthenticated: true }) return;
-    //
-    //     // respond HTTP 401 Unauthorized.
-    //     ctx.Context.Response.StatusCode = (int)HttpStatusCode.Unauthorized;
-    //     // flush response
-    //     ctx.Context.Response.ContentLength = 0;
-    //     ctx.Context.Response.Body = Stream.Null;
-    //     // disable cache
-    //     ctx.Context.Response.Headers.Append("Cache-Control", "no-store");
-    // }
+    FileProvider = staticFileProvider,
+    RequestPath = ""
 });
 
 // Application state init
