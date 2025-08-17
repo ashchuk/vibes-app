@@ -753,7 +753,8 @@ public class TelegramMessageHandler(
             TimeZoneInfo userTimeZone;
             try
             {
-                userTimeZone = TimeZoneInfo.FindSystemTimeZoneById(user.TimeZoneId ?? "Etc/UTC");
+                var timezone = await llmService.GetTimeZoneIdFromUserInputAsync(user.TimeZoneId ?? "Etc/UTC");
+                userTimeZone = TimeZoneInfo.FindSystemTimeZoneById(timezone ?? "Etc/UTC");
             }
             catch (TimeZoneNotFoundException)
             {
