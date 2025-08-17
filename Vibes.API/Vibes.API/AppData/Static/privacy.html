@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="ru" class="scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Политика конфиденциальности - Vibes</title>
+    <meta name="description" content="Политика конфиденциальности для приложения Vibes - трекера ментального здоровья и продуктивности.">
+
+    <!-- TailwindCSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Google Fonts: Manrope -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+
+    <script>
+        // Custom TailwindCSS Configuration (такой же, как на лендинге)
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Manrope', 'sans-serif'],
+                    },
+                    colors: {
+                        'brand-bg': '#0D1117',
+                        'brand-surface': '#161B22',
+                        'brand-primary': '#58A6FF',
+                        'brand-secondary': '#8B949E',
+                        'brand-accent': '#3FB950',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* Стили для текстового контента */
+        .content h2 {
+            font-size: 1.875rem; /* text-3xl */
+            font-weight: 700; /* font-bold */
+            color: white;
+            margin-top: 2rem; /* mt-8 */
+            margin-bottom: 1rem; /* mb-4 */
+            border-bottom: 1px solid #30363d; /* border-gray-700 */
+            padding-bottom: 0.5rem; /* pb-2 */
+        }
+        .content p {
+            margin-bottom: 1.25rem; /* mb-5 */
+            line-height: 1.75; /* leading-relaxed */
+        }
+        .content ul {
+            list-style-type: disc;
+            margin-left: 1.5rem; /* ml-6 */
+            margin-bottom: 1.25rem; /* mb-5 */
+        }
+        .content li {
+            margin-bottom: 0.5rem; /* mb-2 */
+        }
+        .content a {
+            color: #58A6FF; /* brand-primary */
+            text-decoration: underline;
+        }
+    </style>
+</head>
+
+<body class="bg-brand-bg text-brand-secondary antialiased">
+
+<!-- Header -->
+<header class="py-6 px-4 md:px-8">
+    <div class="container mx-auto flex justify-between items-center">
+        <h1 class="text-2xl font-bold text-white">Vibes</h1>
+        <!-- Можно добавить ссылку обратно на главную -->
+        <a href="index.html" class="text-brand-primary hover:text-white transition-colors">
+            На главную
+        </a>
+    </div>
+</header>
+
+<main class="py-12 md:py-16 px-4">
+    <div class="container mx-auto max-w-4xl bg-brand-surface p-8 md:p-12 rounded-xl border border-gray-800">
+        <div class="content">
+            <h1 class="text-4xl font-extrabold text-white mb-6">Политика конфиденциальности</h1>
+            <p><strong>Последнее обновление:</strong> 16 августа 2025 г.</p>
+
+            <p>Настоящая Политика конфиденциальности описывает, как приложение "Vibes" (далее — "Сервис") собирает, использует и защищает вашу информацию. Используя наш Сервис, вы соглашаетесь с условиями данной политики.</p>
+
+            <h2>Сбор и использование данных</h2>
+            <p>Для предоставления своих услуг Сервис может запрашивать доступ к вашим данным. Мы стремимся к минимизации собираемой информации и используем ее исключительно для улучшения вашего опыта взаимодействия с Сервисом.</p>
+
+            <h2>Интеграция с Google Calendar API</h2>
+            <p>Одной из ключевых функций нашего Сервиса является анализ вашего расписания для предоставления персонализированных рекомендаций по управлению временем и энергией. Для этого мы используем Google Calendar API.</p>
+            <ul>
+                <li><strong>Запрашиваемые права (Scope):</strong> Мы запрашиваем доступ к вашему календарю только для чтения (`https://www.googleapis.com/auth/calendar.readonly`). Это означает, что наш Сервис может только просматривать ваши события, но не может их создавать, изменять или удалять.</li>
+                <li><strong>Какие данные мы получаем:</strong> Мы получаем информацию о названиях, времени начала и окончания событий из вашего основного календаря.</li>
+                <li><strong>Как мы используем эти данные:</strong> Данные о ваших событиях используются исключительно внутри Сервиса для анализа вашей загруженности, определения свободных временных слотов и формирования персональных советов. Например, бот может предложить вам сделать перерыв, если видит плотный график встреч.</li>
+                <li><strong>Хранение данных:</strong> Мы не храним копии ваших календарных событий на наших серверах. Мы используем безопасный токен авторизации (refresh token), предоставленный Google, для запроса актуальных данных в режиме реального времени.</li>
+            </ul>
+
+            <p>Использование информации, полученной от Google APIs, будет соответствовать <a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noopener noreferrer">Политике Google в отношении пользовательских данных API-сервисов</a>, включая требования по ограничению использования.</p>
+
+            <h2>Безопасность</h2>
+            <p>Мы принимаем все разумные меры для защиты вашей информации от несанкционированного доступа, изменения или уничтожения. Доступ к вашим данным строго ограничен и используется только для функционирования Сервиса.</p>
+
+            <h2>Изменения в Политике конфиденциальности</h2>
+            <p>Мы можем время от времени обновлять нашу Политику конфиденциальности. Мы уведомим вас о любых изменениях, опубликовав новую версию на этой странице. Рекомендуем периодически просматривать эту страницу для ознакомления с актуальной информацией.</p>
+
+            <h2>Контактная информация</h2>
+            <p>Если у вас есть вопросы относительно данной Политики конфиденциальности, пожалуйста, свяжитесь с нами по электронной почте: <strong>artyomkoshko@gmail.com</strong>.</p>
+        </div>
+    </div>
+</main>
+
+<!-- Footer -->
+<footer class="py-8 px-4 border-t border-gray-800">
+    <div class="container mx-auto text-center text-brand-secondary">
+        <p>&copy; 2024 Vibes. Все права защищены. | vibes.nakodeelee.ru</p>
+    </div>
+</footer>
+
+</body>
+</html>

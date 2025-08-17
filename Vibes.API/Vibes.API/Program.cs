@@ -125,8 +125,8 @@ app.MapControllers();
 
 app.UseStaticFiles(new StaticFileOptions
 {
-    FileProvider = new PhysicalFileProvider(Path.Combine(Directory.GetCurrentDirectory(), "AppData", "Storage")),
-    RequestPath = "/api/storage",
+    FileProvider = new PhysicalFileProvider(Path.Combine(Directory.GetCurrentDirectory(), "AppData", "Static")),
+    RequestPath = "/",
     // Uncomment to enable static files authorization
     // OnPrepareResponse = ctx =>
     // {

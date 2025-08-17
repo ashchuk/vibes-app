@@ -28,8 +28,11 @@
     </ItemGroup>
 
     <ItemGroup>
-        <None Update="Files\bot.gif">
-            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        <None Update="AppData\Static\index.html">
+          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+        </None>
+        <None Update="AppData\Static\privacy.html">
+          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
         </None>
     </ItemGroup>
 

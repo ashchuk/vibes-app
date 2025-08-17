@@ -260,7 +260,7 @@ public class MiniAppController(IOptions<BotConfiguration> config, ILogger<BotCon
                        <!-- Footer -->
                        <footer class="py-8 px-4 border-t border-gray-800">
                            <div class="container mx-auto text-center text-brand-secondary">
-                               <p>&copy; 2024 Vibes. Все права защищены. | MentalVibes.ru</p>
+                               <p>&copy; 2024 Vibes. Все права защищены. | vibes.nakodeelee.ru</p>
                            </div>
                        </footer>
 
