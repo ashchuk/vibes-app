@@ -215,7 +215,30 @@ public class TelegramMessageHandler(
 
         var user = await databaseService.GetOrCreateUserAsync(message.From);
 
-        if (message.Text is { } messageText)
+        string? messageText = message.Text;
+        
+        // 1. Если это аудио или видео, транскрибируем его в текст
+        if (message.Voice is not null || message.VideoNote is not null)
+        {
+            await botClient.SendChatAction(message.Chat.Id, ChatAction.Typing, cancellationToken: cancellationToken);
+            var fileId = message.Voice?.FileId ?? message.VideoNote!.FileId;
+            var mimeType = message.Voice is not null ? "audio/ogg" : "video/mp4";
+        
+            await using var memoryStream = new MemoryStream();
+            var file = await botClient.GetFile(fileId, cancellationToken);
+            if (file.FilePath is null)
+            {
+                await botClient.SendMessage(message.Chat.Id, "Не удалось обработать голосовое сообщение.", cancellationToken: cancellationToken);
+                return;
+            }
+        
+            await botClient.DownloadFile(file.FilePath, memoryStream, cancellationToken);
+            memoryStream.Position = 0;
+
+            messageText = await llmService.TranscribeAudioAsync(memoryStream, mimeType);
+        }
+        
+        if (!string.IsNullOrEmpty(messageText))
         {
             var command = messageText.Split(' ')[0];
             var task = command switch
@@ -225,7 +248,8 @@ public class TelegramMessageHandler(
                 "/energy" => HandleEnergyCommand(user, message.Chat.Id, cancellationToken),
                 "/connect_calendar" => HandleConnectCalendarCommand(user, message.Chat.Id, cancellationToken),
                 "/check_calendar" => HandleCheckCalendarCommand(user, message.Chat.Id, cancellationToken),
-                _ => HandleConversation(user, message, cancellationToken)
+                "/about" => HandleAboutCommand(user, message.Chat.Id, cancellationToken),
+                _ => HandleConversation(user, message, messageText, cancellationToken)
             };
             await task;
         }
@@ -239,6 +263,24 @@ public class TelegramMessageHandler(
         }
     }
 
+    private async Task HandleAboutCommand(VibesUser user, long chatId, CancellationToken cancellationToken)
+    {
+        var aboutText = "Vibes — ваш личный AI-ассистент для управления энергией и задачами.\n\n" +
+                        "Я помогаю находить баланс и избегать выгорания, анализируя ваше расписание и привычки.";
+
+        var inlineKeyboard = new InlineKeyboardMarkup(InlineKeyboardButton.WithUrl(
+            "Перейти на наш сайт",
+            "https://vibes.nakodeelee.ru"
+        ));
+
+        await botClient.SendMessage(
+            chatId: chatId,
+            text: aboutText,
+            replyMarkup: inlineKeyboard,
+            cancellationToken: cancellationToken
+        );
+    }
+    
     private async Task HandleStartCommand(VibesUser user, long chatId, CancellationToken cancellationToken)
     {
         if (user.IsOnboardingCompleted)
@@ -278,9 +320,9 @@ public class TelegramMessageHandler(
         );
     }
 
-    private async Task HandleConversation(VibesUser user, Message message, CancellationToken cancellationToken)
+    private async Task HandleConversation(VibesUser user, Message message, string recognizedText, CancellationToken cancellationToken)
     {
-        if (message.Text is null) return; // Мы обрабатываем только текстовые сообщения в этом методе
+        if (string.IsNullOrEmpty(recognizedText)) return; // Мы обрабатываем только текстовые сообщения в этом методе
 
         switch (user.State)
         {
@@ -289,6 +331,8 @@ public class TelegramMessageHandler(
                 var userInput = message.Text;
     
                 // Вызываем LLM для определения таймзоны
+                await botClient.SendChatAction(message.Chat.Id, ChatAction.Typing, cancellationToken: cancellationToken);
+
                 var timeZoneId = await llmService.GetTimeZoneIdFromUserInputAsync(userInput);
 
                 if (timeZoneId == null)
@@ -329,11 +373,12 @@ public class TelegramMessageHandler(
 
             // --- СЦЕНАРИЙ СБОРА РЕТРО-ДАННЫХ (User Story #8) ---
             case ConversationState.AwaitingRetroSleepAndActivity:
-                var retroData = message.Text;
-                logger.LogInformation("Пользователь {UserId} прислал ретро-данные: {RetroData}", user.Id, retroData);
+                logger.LogInformation("Пользователь {UserId} прислал ретро-данные: {RetroData}", user.Id, recognizedText);
 
                 // Отправляем текст в LlmService и получаем готовый инсайт
-                var insight = await llmService.GenerateRetroInsightAsync(retroData);
+                await botClient.SendChatAction(message.Chat.Id, ChatAction.Typing, cancellationToken: cancellationToken);
+
+                var insight = await llmService.GenerateRetroInsightAsync(recognizedText);
 
                 if (insight.StartsWith("[ERROR]"))
                 {
@@ -356,13 +401,12 @@ public class TelegramMessageHandler(
 
             // --- СЦЕНАРИЙ УТРЕННЕГО ЧЕКАПА ---
             case ConversationState.AwaitingMorningSleepHours:
-                var sleepHours = message.Text;
-                logger.LogInformation("Пользователь {UserId} спал: {SleepHours}", user.Id, sleepHours);
+                logger.LogInformation("Пользователь {UserId} спал: {SleepHours}", user.Id, recognizedText);
 
                 // --- ИЗМЕНЕНИЕ: ОБНОВЛЯЕМ КОНТЕКСТ ДАННЫМИ О СНЕ ---
                 var contextN3 = JsonSerializer.Deserialize<MorningCheckupContext>(user.ConversationContext ?? "{}")
                                 ?? new MorningCheckupContext();
-                contextN3.SleepHours = sleepHours;
+                contextN3.SleepHours = recognizedText;
                 user.ConversationContext = JsonSerializer.Serialize(contextN3);
 
                 user.State = ConversationState.AwaitingMorningPlans;
@@ -372,8 +416,7 @@ public class TelegramMessageHandler(
                 break;
 
             case ConversationState.AwaitingMorningPlans:
-                var plans = message.Text;
-                logger.LogInformation("Планы пользователя {UserId}: {Plans}", user.Id, plans);
+                logger.LogInformation("Планы пользователя {UserId}: {Plans}", user.Id, recognizedText);
 
                 // --- НАЧИНАЕТСЯ ГЛАВНАЯ ЛОГИКА ---
 
@@ -385,10 +428,12 @@ public class TelegramMessageHandler(
                 var morningPlancalendarEvents = await calendarService.GetUpcomingEvents(user, 5);
 
                 // 3. Вызываем LLM для генерации плана
+                await botClient.SendChatAction(message.Chat.Id, ChatAction.Typing, cancellationToken: cancellationToken);
+
                 var generatedPlan = await llmService.GenerateMorningPlanAsync(
                     contextN4.EnergyRating ?? "не указана",
                     contextN4.SleepHours ?? "не указано",
-                    plans,
+                    recognizedText,
                     morningPlancalendarEvents
                 );
 
@@ -420,8 +465,7 @@ public class TelegramMessageHandler(
 
             // --- СЦЕНАРИЙ ПЛАНИРОВАНИЯ ПО ТЕКСТУ ---
             case ConversationState.AwaitingSchedulePhoto:
-                var textSchedule = message.Text;
-                logger.LogInformation("Пользователь {UserId} прислал расписание текстом: {TextSchedule}", user.Id, textSchedule);
+                logger.LogInformation("Пользователь {UserId} прислал расписание текстом: {TextSchedule}", user.Id, recognizedText);
 
 
                 // 1. Сообщаем пользователю, что мы начали работу
@@ -434,8 +478,10 @@ public class TelegramMessageHandler(
                 var recentRatings = await databaseService.GetRecentEventRatingsAsync(user.Id);
 
                 // 3. Вызываем LLM для генерации плана на основе текста и событий календаря
+                await botClient.SendChatAction(message.Chat.Id, ChatAction.Typing, cancellationToken: cancellationToken);
+
                 var structuredPlan = await llmService.GeneratePlanFromTextAsync(
-                    textSchedule,
+                    recognizedText,
                     scheduleCalendarEvents,
                     recentPlans,
                     recentRatings);
@@ -471,7 +517,7 @@ public class TelegramMessageHandler(
                 // вежливо предлагаем начать с известной команды.
                 // Если мы не находимся в середине какого-то диалога,
                 // пытаемся понять, что хочет пользователь.
-                await HandleDefaultMessageAsync(user, message, cancellationToken);
+                await HandleDefaultMessageAsync(user, message, recognizedText, cancellationToken);
                 break;
         }
     }
@@ -498,6 +544,8 @@ public class TelegramMessageHandler(
         if (user.IsGoogleCalendarConnected)
         {
             // 2.1. Отправляем текст плана в LLM, чтобы извлечь детали события
+            await botClient.SendChatAction(message.Chat.Id, ChatAction.Typing, cancellationToken: cancellationToken);
+
             var extractedEvent = await llmService.ExtractFirstEventFromPlanAsync(planText, DateTime.UtcNow);
 
             if (extractedEvent.Found && extractedEvent.StartTime.HasValue && extractedEvent.EndTime.HasValue)
@@ -744,6 +792,7 @@ public class TelegramMessageHandler(
             memoryStream.Position = 0; // Сбрасываем позицию потока в начало для чтения
 
             // 3. Отправляем поток в наш LlmService
+            await botClient.SendChatAction(message.Chat.Id, ChatAction.Typing, cancellationToken: cancellationToken);
             var recognizedText = await llmService.RecognizeScheduleFromImageAsync(memoryStream);
 
             string responseToUser;
@@ -871,10 +920,10 @@ public class TelegramMessageHandler(
         // Другие исключения (например, проблемы с сетью) будут обработаны выше по стеку вызовов.
     }
 
-    private async Task HandleDefaultMessageAsync(VibesUser user, Message message, CancellationToken cancellationToken)
+    private async Task HandleDefaultMessageAsync(VibesUser user, Message message, string recognizedText, CancellationToken cancellationToken)
     {
-        if (message.Text is null) return;
-
+        if (string.IsNullOrEmpty(recognizedText)) return;
+        
         // 0. Если пользователь новый и пишет что-то, кроме /start,
         // мы все равно должны сначала провести его через онбординг.
         if (!user.IsOnboardingCompleted)
@@ -882,9 +931,10 @@ public class TelegramMessageHandler(
             await HandleStartCommand(user, message.Chat.Id, cancellationToken);
             return;
         }
-
+        
         // 1. Отправляем текст в LLM для классификации
-        var intent = await llmService.ClassifyUserIntentAsync(message.Text);
+        await botClient.SendChatAction(message.Chat.Id, ChatAction.Typing, cancellationToken: cancellationToken);
+        var intent = await llmService.ClassifyUserIntentAsync(recognizedText);
 
         // 2. Выполняем действие в зависимости от намерения
         switch (intent)
@@ -911,11 +961,18 @@ public class TelegramMessageHandler(
                 await HandleConnectCalendarCommand(user, message.Chat.Id, cancellationToken);
                 break;
 
+            case UserIntent.About:
+                logger.LogInformation("Определено намерение: About");
+                await HandleAboutCommand(user, message.Chat.Id, cancellationToken);
+                break;
+            
             case UserIntent.GeneralChat:
                 logger.LogInformation("Определено намерение: GeneralChat");
     
                 if (message.Text is not null)
                 {
+                    await botClient.SendChatAction(message.Chat.Id, ChatAction.Typing, cancellationToken: cancellationToken);
+
                     var response = await llmService.GenerateGeneralChatResponseAsync(message.Text);
                     if (response.Contains("[ERROR]"))
                     {

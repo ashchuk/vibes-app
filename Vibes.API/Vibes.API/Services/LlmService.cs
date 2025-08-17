@@ -46,6 +46,8 @@ public interface ILlmService
     Task<string?> GetTimeZoneIdFromUserInputAsync(string userInput);
 
     Task<string> GenerateGeneralChatResponseAsync(string userText);
+    
+    Task<string> TranscribeAudioAsync(Stream audioStream, string mimeType);
 }
 
 public class LlmService : ILlmService
@@ -509,6 +511,9 @@ public class LlmService : ILlmService
 
                           **--- РАСШИРЕННОЕ ОПИСАНИЕ НАМЕРЕНИЙ ---**
 
+                          - **About**: Пользователь задает вопросы о самом боте, его функциях, создателях или предназначении.
+                            Примеры: "что ты умеешь?", "кто ты?", "расскажи о себе", "для чего ты нужен?", "помощь", "help"
+                      
                           - **Plan**: Пользователь хочет составить, изменить или добавить что-то в план. Фокус на **будущих действиях**.
                             Примеры: "составь план на день", "хочу запланировать встречу с Анной в 3", "добавь в мой список дел 'купить молоко'", "на сегодня у меня такие задачи...", "что мне сегодня делать?", "накидай расписание", "завтра нужно сдать отчет и позвонить маме"
 
@@ -548,6 +553,35 @@ public class LlmService : ILlmService
         {
             _logger.LogError(ex, "Ошибка при классификации намерения пользователя.");
             return UserIntent.Unknown;
+        }
+    }
+    
+    public async Task<string> TranscribeAudioAsync(Stream audioStream, string mimeType)
+    {
+        // Для транскрибации лучше всего подходят специализированные модели,
+        // но для хакатона мы можем использовать Gemini 1.5 Flash, она тоже умеет это делать.
+        var prompt = "Транскрибируй аудиофайл. Верни только распознанный текст, без каких-либо комментариев.";
+
+        try
+        {
+            using var memoryStream = new MemoryStream();
+            await audioStream.CopyToAsync(memoryStream);
+            var audioBytes = memoryStream.ToArray();
+
+            var parts = new List<IPart>
+            {
+                new TextData { Text = prompt },
+                new InlineData { MimeType = mimeType, Data = Convert.ToBase64String(audioBytes) }
+            };
+            
+            // Важно: Мы используем ту же модель, что и для Vision, так как она мультимодальная
+            var response = await _model.GenerateContent(parts);
+            return response.Text;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Ошибка при транскрибации аудио.");
+            return string.Empty; // Возвращаем пустую строку в случае ошибки
         }
     }
 }

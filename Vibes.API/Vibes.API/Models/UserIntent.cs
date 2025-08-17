@@ -12,6 +12,8 @@ public enum UserIntent
     ActivateCalendar,
     // Беседа
     GeneralChat,
+    // Расскажи о себе
+    About,
     // Намерение не удалось определить
     Unknown
 }
