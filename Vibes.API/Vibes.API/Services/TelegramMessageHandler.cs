@@ -200,6 +200,7 @@ public class TelegramMessageHandler(
         await botClient.SendMessage(
             chatId: chatId,
             text: "Отлично! Укажи, пожалуйста, твой город или часовой пояс в формате UTC+X (например, UTC+3).",
+            replyMarkup: new InlineKeyboardMarkup(InlineKeyboardButton.WithCallbackData("❌ Отмена", "dialog_cancel")),
             cancellationToken: cancellationToken);
     }
 
@@ -224,6 +225,7 @@ public class TelegramMessageHandler(
         await botClient.SendMessage(
             chatId: callbackQuery.From.Id,
             text: "Понял. А сколько примерно часов ты спал(а) сегодня?",
+            replyMarkup: new InlineKeyboardMarkup(InlineKeyboardButton.WithCallbackData("❌ Отмена", "dialog_cancel")),
             cancellationToken: cancellationToken);
     }
 
@@ -430,7 +432,10 @@ public class TelegramMessageHandler(
                 user.State = ConversationState.AwaitingMorningPlans;
                 await databaseService.UpdateUserAsync(user);
 
-                await botClient.SendMessage(message.Chat.Id, "Отлично. Чем сегодня займёмся? Назови 1–3 обязательных дела.", cancellationToken: cancellationToken);
+                await botClient.SendMessage(message.Chat.Id,
+                    "Отлично. Чем сегодня займёмся? Назови 1–3 обязательных дела.", 
+                    replyMarkup: new InlineKeyboardMarkup(InlineKeyboardButton.WithCallbackData("❌ Отмена", "dialog_cancel")),
+                    cancellationToken: cancellationToken);
                 break;
 
             case ConversationState.AwaitingMorningPlans:
@@ -852,6 +857,7 @@ public class TelegramMessageHandler(
         await botClient.SendMessage(
             chatId: chatId,
             text: "Пришли фото расписания или напиши 1–3 главные задачи — соберу план.",
+            replyMarkup: new InlineKeyboardMarkup(InlineKeyboardButton.WithCallbackData("❌ Отмена", "dialog_cancel")),
             cancellationToken: cancellationToken);
     }
 
